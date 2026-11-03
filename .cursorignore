@@ -1,0 +1,2 @@
+# Keep local credentials out of Cursor indexing where supported.
+firmware/**/secrets.h

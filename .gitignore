@@ -1,0 +1,22 @@
+# Wi-Fi / API credentials (copy from secrets.h.example)
+firmware/**/secrets.h
+
+build/
+__pycache__/
+.DS_Store
+*.swp
+*.swo
+*~
+
+# Local tooling / IDE
+.vscode/
+.idea/
+
+# Arduino CLI build output (if used). Firmware images embed the Wi-Fi
+# passwords from secrets.h in plain text, so never commit them.
+*.hex
+*.elf
+*.bin
+*.map
+
+.venv/
