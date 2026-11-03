@@ -35,6 +35,11 @@
   "7e7a,7774,77de,6115,61ba,61eb,610b,6101,6117"
 #endif
 
+// Heat pump energy fields, always appended (also when secrets.h overrides the
+// list above): COP, electrical/thermal power, kWh counters, compressor state.
+#define XTEND_ENERGY_FIELDS \
+  "f934,f91f,f926,63b3,63f0,6358,6339,63df,65a7,657e,6a53,6ac5"
+
 // --- Poll interval ---
 static const unsigned long POLL_INTERVAL_MS = 15000;
 static const uint16_t HTTP_TIMEOUT_MS = 5000;
@@ -103,7 +108,8 @@ void loop() {
     return;
   }
 
-  String url = String(BOILER_API_BASE) + "/api/stats/values?fields=" + BOILER_STATS_FIELDS;
+  String url = String(BOILER_API_BASE) + "/api/stats/values?fields=" + BOILER_STATS_FIELDS + "," +
+               XTEND_ENERGY_FIELDS;
 
   HTTPClient http;
   http.setConnectTimeout(HTTP_TIMEOUT_MS);

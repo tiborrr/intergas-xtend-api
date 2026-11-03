@@ -27,7 +27,7 @@ Credentials live only in **`secrets.h`** next to each sketch. Those files are **
 
 3. **Never** paste `secrets.h` into chat, screenshots of it, or commit it. The `.ino` files only `#include "secrets.h"`; if `secrets.h` is missing, the build stops with a clear error.
 
-**BoilerBridge_Client `secrets.h`:** `BOILER_SSID`, `BOILER_PASS`, **`BOILER_API_BASE`** (no trailing slash, e.g. `"http://10.20.30.1"`). Optional **`BOILER_STATS_FIELDS`** overrides the default field list in `BoilerBridge_Client.ino` (field ids are not secret, so they live in the sketch). Plain **HTTP** by default; **HTTPS** needs extra `HTTPClient` certificate setup.
+**BoilerBridge_Client `secrets.h`:** `BOILER_SSID`, `BOILER_PASS`, **`BOILER_API_BASE`** (no trailing slash, e.g. `"http://10.20.30.1"`). Optional **`BOILER_STATS_FIELDS`** overrides the default field list in `BoilerBridge_Client.ino` (field ids are not secret, so they live in the sketch). The heat pump energy fields in **`XTEND_ENERGY_FIELDS`** (COP, electrical/thermal power, kWh counters, compressor frequency) are always appended. Plain **HTTP** by default; **HTTPS** needs extra `HTTPClient` certificate setup.
 
 If you still have **`BOILER_API_URL`** from an older checkout, replace it with **`BOILER_API_BASE`** using `secrets.h.example` as a template.
 
