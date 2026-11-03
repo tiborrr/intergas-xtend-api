@@ -241,7 +241,7 @@ static bool tryBuildFormattedFromStats(JsonObject stats) {
         o["name"] = fd->name;
         o["type"] = fd->type;
         o["unit"] = fd->unit;
-        o["scaled"] = (b ? 1.0 : 0.0) * static_cast<double>(fd->factor);
+        o["scaled"] = (b ? 1.0 : 0.0) * fd->factor;
       }
     } else {
       const double rawNum = v.as<double>();
@@ -254,7 +254,7 @@ static bool tryBuildFormattedFromStats(JsonObject stats) {
             v.as<long>() == XTEND_INT16_NOT_AVAILABLE) {
           o["scaled"] = nullptr;
         } else {
-          o["scaled"] = rawNum * static_cast<double>(fd->factor);
+          o["scaled"] = rawNum * fd->factor;
         }
       }
     }

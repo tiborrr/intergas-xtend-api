@@ -78,14 +78,15 @@ def main() -> None:
         "  const char *name;",
         "  const char *type;",
         "  const char *unit;",
-        "  float factor;",
+        # double, not float: 0.01f widens to 0.0099999998 and /data showed 1.889999958
+        "  double factor;",
         "};",
         "",
         "static const XtendField kXtendFields[] = {",
     ]
     for name, key_int, typ, unit, _val, factor in rows:
         lines_out.append(
-            f'  {{ 0x{key_int:04x}, "{name}", "{typ}", "{unit}", {factor}f }},'
+            f'  {{ 0x{key_int:04x}, "{name}", "{typ}", "{unit}", {factor} }},'
         )
     lines_out.extend(
         [
