@@ -4,8 +4,8 @@
  * Libraries: WiFi, HTTPClient (built-in with ESP32 board package)
  *
  * Role: STA on boiler Wi-Fi. Polls the boiler API and sends the body to
- *       BoilerBridge_Server over Serial2, and carries out the server's read-only
- *       passthrough requests against the boiler (frames: see bridge_link.h).
+ *       BoilerBridge_Server over Serial2, and carries out the server's passthrough
+ *       requests against the boiler (frames: see bridge_link.h).
  *
  * UART wiring to server board: this TX -> other RX, this RX <- other TX, GND common.
  * Default pins match README; change SERIAL2_RX / SERIAL2_TX if your board differs.
@@ -27,23 +27,20 @@
 #endif
 
 #if defined(BOILER_API_URL) && !defined(BOILER_API_BASE)
-#error "BoilerBridge_Client: replace BOILER_API_URL with BOILER_API_BASE and BOILER_STATS_FIELDS (see secrets.h.example)."
+#error "BoilerBridge_Client: replace BOILER_API_URL with BOILER_API_BASE (see secrets.h.example)."
 #endif
 #if !defined(BOILER_API_BASE)
 #error "BoilerBridge_Client: secrets.h must define BOILER_API_BASE (see secrets.h.example)."
 #endif
-
-// Field ids are not secret; secrets.h may still override them.
-#ifndef BOILER_STATS_FIELDS
-#define BOILER_STATS_FIELDS                                                                                            \
-  "7940,79b3,7921,7e2c,77c3,7e51,77d2,f9f2,7ed3,629c,6280,621d,62ed,503e,5088,5077,5041,50f2,62d1,620f,6206,8439,47e0," \
-  "7e7a,7774,77de,6115,61ba,61eb,610b,6101,6117"
+#ifdef BOILER_STATS_FIELDS
+#error "BoilerBridge_Client: remove BOILER_STATS_FIELDS from secrets.h, the list is now STATS_FIELDS in this sketch."
 #endif
 
-// Heat pump energy fields, always appended (also when secrets.h overrides the
-// list above): COP, electrical/thermal power, kWh counters, compressor state.
-#define XTEND_ENERGY_FIELDS \
-  "f934,f91f,f926,63b3,63f0,6358,6339,63df,65a7,657e,6a53,6ac5"
+static const char *STATS_FIELDS =
+    "7940,79b3,7921,7e2c,77c3,7e51,77d2,f9f2,7ed3,629c,6280,621d,62ed,503e,5088,5077,5041,50f2,62d1,620f,6206,8439,47e0,"
+    "7e7a,7774,77de,6115,61ba,61eb,610b,6101,6117,"
+    // Heat pump energy: COP, electrical/thermal power, kWh counters, compressor state.
+    "f934,f91f,f926,63b3,63f0,6358,6339,63df,65a7,657e,6a53,6ac5";
 
 // --- Poll interval ---
 static const unsigned long POLL_INTERVAL_MS = 15000;
@@ -206,8 +203,9 @@ static void respondError(uint8_t id, const char *head) {
   sendFrame(bridge::kRespEnd, id, &aborted, 1);
 }
 
-// s_request: "METHOD /path\nName: value\n..."
+// s_request: "METHOD /path\nName: value\n...", for a POST followed by "\nbody"
 static void handlePassthrough(uint8_t id) {
+  const char *request_body = bridge::splitRequestBody(s_request);
   char *line_end = strchr(s_request, '\n');
   if (line_end != nullptr) {
     *line_end = '\0';
@@ -221,8 +219,9 @@ static void handlePassthrough(uint8_t id) {
   const char *method = s_request;
   const char *path = space + 1;
   const bool is_head = strcmp(method, "HEAD") == 0;
+  const bool is_post = strcmp(method, "POST") == 0;
   // The server already filters this; this board is what talks to the boiler.
-  if (strcmp(method, "GET") != 0 && !is_head) {
+  if (strcmp(method, "GET") != 0 && !is_head && !(is_post && bridge::isPostAllowed(path))) {
     respondError(id, "405\n");
     return;
   }
@@ -263,7 +262,10 @@ static void handlePassthrough(uint8_t id) {
   const size_t count = sizeof(kResponseHeaders) / sizeof(kResponseHeaders[0]);
   http.collectHeaders(kResponseHeaders, count);
 
-  const int code = http.sendRequest(method);
+  const int code = is_post && request_body != nullptr
+                       ? http.sendRequest(method, reinterpret_cast<uint8_t *>(const_cast<char *>(request_body)),
+                                          strlen(request_body))
+                       : http.sendRequest(method);
   if (code <= 0) {
     Serial.printf("Passthrough %s %s failed: %d %s\n", method, path, code, http.errorToString(code).c_str());
     http.end();
@@ -438,8 +440,7 @@ void loop() {
     return;
   }
 
-  String url = String(BOILER_API_BASE) + "/api/stats/values?fields=" + BOILER_STATS_FIELDS + "," +
-               XTEND_ENERGY_FIELDS;
+  String url = String(BOILER_API_BASE) + "/api/stats/values?fields=" + STATS_FIELDS;
 
   HTTPClient http;
   http.setConnectTimeout(HTTP_TIMEOUT_MS);

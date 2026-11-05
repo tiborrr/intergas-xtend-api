@@ -27,13 +27,13 @@ Credentials live only in **`secrets.h`** next to each sketch. Those files are **
 
 3. **Never** paste `secrets.h` into chat, screenshots of it, or commit it. The `.ino` files only `#include "secrets.h"`; if `secrets.h` is missing, the build stops with a clear error.
 
-**BoilerBridge_Client `secrets.h`:** `BOILER_SSID`, `BOILER_PASS`, **`BOILER_API_BASE`** (no trailing slash, e.g. `"http://10.20.30.1"`). Optional **`BOILER_STATS_FIELDS`** overrides the default field list in `BoilerBridge_Client.ino` (field ids are not secret, so they live in the sketch). The heat pump energy fields in **`XTEND_ENERGY_FIELDS`** (COP, electrical/thermal power, kWh counters, compressor frequency) are always appended. Plain **HTTP** by default; **HTTPS** needs extra `HTTPClient` certificate setup.
+**BoilerBridge_Client `secrets.h`:** `BOILER_SSID`, `BOILER_PASS`, **`BOILER_API_BASE`** (no trailing slash, e.g. `"http://10.20.30.1"`). The polled field ids are not secret, so they live in the sketch as **`STATS_FIELDS`**, including the heat pump energy fields (COP, electrical/thermal power, kWh counters, compressor frequency). Plain **HTTP** by default; **HTTPS** needs extra `HTTPClient` certificate setup.
 
 If you still have **`BOILER_API_URL`** from an older checkout, replace it with **`BOILER_API_BASE`** using `secrets.h.example` as a template.
 
 Compiled firmware (`.bin`, `.elf`) contains these passwords in plain text; `.gitignore` keeps them out of git — don't share build output either.
 
-**BoilerBridge_Server `secrets.h`:** `HOME_SSID`, `HOME_PASS`, **`OTA_PASSWORD`** (protects firmware updates; generate one with `openssl rand -hex 16`).
+**BoilerBridge_Server `secrets.h`:** `HOME_SSID`, `HOME_PASS`, **`OTA_PASSWORD`** (protects firmware updates; generate one with `openssl rand -hex 16`), **`BRIDGE_PASSWORD`** (protects the passthrough, user `xtend`; generate it the same way).
 
 `secrets.h.example` stays in git with **fake placeholders** only.
 
@@ -129,7 +129,8 @@ When both are running and UART is wired:
 | **`GET /status`** | Bridge health: `build`, `uptime_s`, `frames_ok`, `frames_bad`, `data_age_ms`, `link_errors`, `pass_requests`, `pass_failed`, `wifi_rssi_dbm`, `free_heap`. |
 | **`GET /`** | Short text hint. |
 | **`GET /xtend/`** | The Xtend's own `/`. |
-| **any other `GET` or `HEAD`** | Passed to the Xtend unchanged, for example `/api/stats/values?fields=7940`. Read-only for now: other methods get 405. |
+| **any other `GET` or `HEAD`** | Passed to the Xtend unchanged, for example `/api/stats/values?fields=7940`. Needs the password (user `xtend`). |
+| **`POST /api/auth`** | The dashboard's service login, passed to the Xtend. Needs the password. Every other `POST` gets 405, so settings can't be written through the bridge. The password travels unencrypted: keep the bridge off the internet. |
 | **`POST /ota/server`, `/ota/client`** | Firmware upload, see OTA above. |
 
 The server announces itself over mDNS, so `http://boilerbridge.local/data` works on most networks.
@@ -144,7 +145,7 @@ Both boards reboot themselves when stuck: the client after 60 s without boiler W
 
 ## Protocol
 
-Client **HTTP GET**s `BOILER_API_BASE + "/api/stats/values?fields=" + BOILER_STATS_FIELDS`, then sends the response body to the server as a frame. All UART traffic is in CRC-checked frames, see `firmware/shared/bridge_link.h`; test them without hardware:
+Client **HTTP GET**s `BOILER_API_BASE + "/api/stats/values?fields=" + STATS_FIELDS`, then sends the response body to the server as a frame. All UART traffic is in CRC-checked frames, see `firmware/shared/bridge_link.h`; test them without hardware:
 
 ```bash
 c++ -std=c++17 -Ifirmware/shared tests/test_bridge_link.cpp -o /tmp/test_bridge_link && /tmp/test_bridge_link

@@ -7,7 +7,8 @@
  *       see bridge_link.h), serve formatted GET /data, raw GET /data/raw and
  *       bridge health GET /status. Reachable as http://boilerbridge.local
  *       Every other GET or HEAD goes to the boiler through the client board:
- *       /xtend/ is the boiler's own /, other paths stay as they are.
+ *       /xtend/ is the boiler's own /, other paths stay as they are. This needs
+ *       a password, and POST only reaches the service login (bridge_link.h).
  *       POST /ota/server and /ota/client install new firmware (password needed).
  *
  * Valid JSON + stats is parsed once per complete frame; HTTP handlers serve
@@ -41,6 +42,9 @@
 
 #ifndef OTA_PASSWORD
 #error "secrets.h must define OTA_PASSWORD (see secrets.h.example): the boards can't be reached over USB later."
+#endif
+#ifndef BRIDGE_PASSWORD
+#error "secrets.h must define BRIDGE_PASSWORD (see secrets.h.example): it protects the passthrough to the boiler."
 #endif
 #ifndef CONFIG_APP_ROLLBACK_ENABLE
 #error "This firmware relies on the bootloader rolling back a bad update."
@@ -78,6 +82,8 @@ static const unsigned long PASS_HEAD_TIMEOUT_MS = 15000;
 // Longer than the client's PASS_ACK_TIMEOUT_MS.
 static const unsigned long PASS_CHUNK_TIMEOUT_MS = 30000;
 static const unsigned long PASS_REQUEST_MAX_MS = 100000;
+static const char *PASS_USER = "xtend";
+static const size_t PASS_POST_BODY_MAX = 512;
 
 static const char *OTA_USER = "ota";
 // Writing a chunk can include erasing flash on the client board.
@@ -412,13 +418,16 @@ static String encodeQueryPart(const String &part) {
   return out;
 }
 
-static String boilerPath() {
-  String path = server.uri();
-  if (path == "/xtend") {
-    path = "/";
-  } else if (path.startsWith("/xtend/")) {
-    path = path.substring(6);
+static String boilerUri() {
+  const String uri = server.uri();
+  if (uri == "/xtend") {
+    return "/";
   }
+  return uri.startsWith("/xtend/") ? uri.substring(6) : uri;
+}
+
+static String boilerPath() {
+  String path = boilerUri();
   for (int i = 0; i < server.args(); ++i) {
     path += i == 0 ? '?' : '&';
     path += encodeQueryPart(server.argName(i));
@@ -483,20 +492,38 @@ static bool forwardHead(bool has_body) {
 }
 
 void handlePassthrough() {
+  if (!server.authenticate(PASS_USER, BRIDGE_PASSWORD)) {
+    server.requestAuthentication(BASIC_AUTH, "BoilerBridge");
+    return;
+  }
   const HTTPMethod method = server.method();
-  if (method != HTTP_GET && method != HTTP_HEAD) {
-    server.send(405, "text/plain", "passthrough is read-only: GET and HEAD only\n");
+  const bool is_post = method == HTTP_POST;
+  if (method != HTTP_GET && method != HTTP_HEAD && !(is_post && bridge::isPostAllowed(boilerUri().c_str()))) {
+    server.send(405, "text/plain", "the passthrough only allows GET, HEAD and the service login\n");
+    return;
+  }
+  // The web server hands a body it doesn't parse as form data over as "plain".
+  if (is_post && (!server.hasArg("plain") || server.arg("plain").length() > PASS_POST_BODY_MAX)) {
+    server.send(400, "text/plain", "send a short text body\n");
     return;
   }
   ++s_passRequests;
 
   static uint8_t s_nextId = 0;
   const uint8_t id = ++s_nextId;
-  String request = String(method == HTTP_HEAD ? "HEAD " : "GET ") + boilerPath() + "\n";
+  // A POST has no query: the login's body would otherwise end up in it as "plain".
+  String request = is_post ? "POST " + boilerUri() : String(method == HTTP_HEAD ? "HEAD " : "GET ") + boilerPath();
+  request += "\n";
   for (const char *name : kForwardedRequestHeaders) {
     if (server.hasHeader(name)) {
       request += String(name) + ": " + server.header(name) + "\n";
     }
+  }
+  if (is_post) {
+    if (server.hasHeader("Content-Type")) {
+      request += "Content-Type: " + server.header("Content-Type") + "\n";
+    }
+    request += "\n" + server.arg("plain");
   }
   if (request.length() > 2048) {
     server.send(414, "text/plain", "request too long for the passthrough\n");
@@ -506,13 +533,13 @@ void handlePassthrough() {
   const unsigned long deadline = millis() + PASS_REQUEST_MAX_MS;
   sendFrame(bridge::kRequest, id, request.c_str(), request.length());
 
+  const bool has_body = method != HTTP_HEAD;
   if (!nextPassFrame(id, PASS_HEAD_TIMEOUT_MS, deadline) || s_parser.type() != bridge::kRespHead ||
-      !forwardHead(method == HTTP_GET)) {
+      !forwardHead(has_body)) {
     ++s_passFailed;
     server.send(504, "text/plain", "no answer from the boiler (see /status)\n");
     return;
   }
-  const bool has_body = method == HTTP_GET;
   sendFrame(bridge::kAck, id, nullptr, 0);
 
   bool complete = false;

@@ -8,12 +8,13 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 
 namespace bridge {
 
 enum FrameType : uint8_t {
   kStats = 1,     // client -> server: JSON body from the stats poll
-  kRequest = 2,   // server -> client: "METHOD /path\nName: value\n..."
+  kRequest = 2,   // server -> client: "METHOD /path\nName: value\n...", for a POST followed by "\nbody"
   kRespHead = 3,  // client -> server: "code\nName: value\n..."
   kRespData = 4,  // client -> server: body chunk, answered with kAck
   kRespEnd = 5,   // client -> server: 0 = complete, 1 = aborted
@@ -31,6 +32,21 @@ static const size_t kCrcSize = 2;
 // One body chunk. The sender waits for kAck after each, so this also bounds
 // what can pile up in the receiver's UART buffer.
 static const size_t kChunkSize = 1024;
+
+// The only path the passthrough may POST to: the dashboard's service login. An
+// exact match, so settings (/api/params/values) can't be written through the bridge.
+inline bool isPostAllowed(const char *path) { return std::strcmp(path, "/api/auth") == 0; }
+
+// Cuts a request frame's text at the blank line and returns the body after it,
+// or nullptr when it has none.
+inline char *splitRequestBody(char *text) {
+  char *gap = std::strstr(text, "\n\n");
+  if (gap == nullptr) {
+    return nullptr;
+  }
+  gap[1] = '\0';
+  return gap + 2;
+}
 
 inline uint16_t crc16Update(uint16_t crc, uint8_t byte) {  // CRC-16/CCITT-FALSE
   crc ^= static_cast<uint16_t>(byte) << 8;

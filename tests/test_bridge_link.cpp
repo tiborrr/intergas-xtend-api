@@ -113,7 +113,39 @@ static void test_back_to_back_frames() {
   assert(parser.type() == kRespEnd);
 }
 
+static void test_only_the_service_login_may_be_posted_to() {
+  assert(isPostAllowed("/api/auth"));
+  for (const char *path : {"/api/params/values", "/api/set_block", "/api/schedules", "/api/auth/", "/api/auth?x=1",
+                           "/api/authx", "/API/AUTH", "/xtend/api/auth", "/", ""}) {
+    assert(!isPostAllowed(path));
+  }
+}
+
+static void test_request_body_is_split_off() {
+  char request[] = "POST /api/auth\nContent-Type: text/plain\n\n{\"code\":1}";
+  const char *body = splitRequestBody(request);
+  assert(body != nullptr && std::string(body) == "{\"code\":1}");
+  assert(std::string(request) == "POST /api/auth\nContent-Type: text/plain\n");
+}
+
+static void test_request_without_body() {
+  char request[] = "GET /index.html\nAccept: */*\n";
+  assert(splitRequestBody(request) == nullptr);
+  assert(std::string(request) == "GET /index.html\nAccept: */*\n");
+}
+
+static void test_body_may_hold_a_blank_line() {
+  char request[] = "POST /api/auth\n\na\n\nb";
+  const char *body = splitRequestBody(request);
+  assert(body != nullptr && std::string(body) == "a\n\nb");
+  assert(std::string(request) == "POST /api/auth\n");
+}
+
 int main() {
+  test_only_the_service_login_may_be_posted_to();
+  test_request_body_is_split_off();
+  test_request_without_body();
+  test_body_may_hold_a_blank_line();
   test_known_crc();
   test_round_trip();
   test_empty_payload();
