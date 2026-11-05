@@ -33,7 +33,7 @@ If you still have **`BOILER_API_URL`** from an older checkout, replace it with *
 
 Compiled firmware (`.bin`, `.elf`) contains these passwords in plain text; `.gitignore` keeps them out of git — don't share build output either.
 
-**BoilerBridge_Server `secrets.h`:** `HOME_SSID`, `HOME_PASS`, **`OTA_PASSWORD`** (protects firmware updates; generate one with `openssl rand -hex 16`).
+**BoilerBridge_Server `secrets.h`:** `HOME_SSID`, `HOME_PASS`, **`OTA_PASSWORD`** (protects firmware updates; generate one with `openssl rand -hex 16`), **`BRIDGE_PASSWORD`** (protects the passthrough, user `xtend`; generate it the same way).
 
 `secrets.h.example` stays in git with **fake placeholders** only.
 
@@ -129,7 +129,8 @@ When both are running and UART is wired:
 | **`GET /status`** | Bridge health: `build`, `uptime_s`, `frames_ok`, `frames_bad`, `data_age_ms`, `link_errors`, `pass_requests`, `pass_failed`, `wifi_rssi_dbm`, `free_heap`. |
 | **`GET /`** | Short text hint. |
 | **`GET /xtend/`** | The Xtend's own `/`. |
-| **any other `GET` or `HEAD`** | Passed to the Xtend unchanged, for example `/api/stats/values?fields=7940`. Read-only for now: other methods get 405. |
+| **any other `GET` or `HEAD`** | Passed to the Xtend unchanged, for example `/api/stats/values?fields=7940`. Needs the password (user `xtend`). |
+| **`POST /api/auth`** | The dashboard's service login, passed to the Xtend. Needs the password. Every other `POST` gets 405, so settings can't be written through the bridge. The password travels unencrypted: keep the bridge off the internet. |
 | **`POST /ota/server`, `/ota/client`** | Firmware upload, see OTA above. |
 
 The server announces itself over mDNS, so `http://boilerbridge.local/data` works on most networks.

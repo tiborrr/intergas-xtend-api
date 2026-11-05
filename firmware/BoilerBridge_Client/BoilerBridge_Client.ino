@@ -4,8 +4,8 @@
  * Libraries: WiFi, HTTPClient (built-in with ESP32 board package)
  *
  * Role: STA on boiler Wi-Fi. Polls the boiler API and sends the body to
- *       BoilerBridge_Server over Serial2, and carries out the server's read-only
- *       passthrough requests against the boiler (frames: see bridge_link.h).
+ *       BoilerBridge_Server over Serial2, and carries out the server's passthrough
+ *       requests against the boiler (frames: see bridge_link.h).
  *
  * UART wiring to server board: this TX -> other RX, this RX <- other TX, GND common.
  * Default pins match README; change SERIAL2_RX / SERIAL2_TX if your board differs.
@@ -206,8 +206,9 @@ static void respondError(uint8_t id, const char *head) {
   sendFrame(bridge::kRespEnd, id, &aborted, 1);
 }
 
-// s_request: "METHOD /path\nName: value\n..."
+// s_request: "METHOD /path\nName: value\n...", for a POST followed by "\nbody"
 static void handlePassthrough(uint8_t id) {
+  const char *request_body = bridge::splitRequestBody(s_request);
   char *line_end = strchr(s_request, '\n');
   if (line_end != nullptr) {
     *line_end = '\0';
@@ -221,8 +222,9 @@ static void handlePassthrough(uint8_t id) {
   const char *method = s_request;
   const char *path = space + 1;
   const bool is_head = strcmp(method, "HEAD") == 0;
+  const bool is_post = strcmp(method, "POST") == 0;
   // The server already filters this; this board is what talks to the boiler.
-  if (strcmp(method, "GET") != 0 && !is_head) {
+  if (strcmp(method, "GET") != 0 && !is_head && !(is_post && bridge::isPostAllowed(path))) {
     respondError(id, "405\n");
     return;
   }
@@ -263,7 +265,10 @@ static void handlePassthrough(uint8_t id) {
   const size_t count = sizeof(kResponseHeaders) / sizeof(kResponseHeaders[0]);
   http.collectHeaders(kResponseHeaders, count);
 
-  const int code = http.sendRequest(method);
+  const int code = is_post && request_body != nullptr
+                       ? http.sendRequest(method, reinterpret_cast<uint8_t *>(const_cast<char *>(request_body)),
+                                          strlen(request_body))
+                       : http.sendRequest(method);
   if (code <= 0) {
     Serial.printf("Passthrough %s %s failed: %d %s\n", method, path, code, http.errorToString(code).c_str());
     http.end();
