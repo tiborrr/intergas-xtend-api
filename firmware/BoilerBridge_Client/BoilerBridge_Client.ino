@@ -27,23 +27,20 @@
 #endif
 
 #if defined(BOILER_API_URL) && !defined(BOILER_API_BASE)
-#error "BoilerBridge_Client: replace BOILER_API_URL with BOILER_API_BASE and BOILER_STATS_FIELDS (see secrets.h.example)."
+#error "BoilerBridge_Client: replace BOILER_API_URL with BOILER_API_BASE (see secrets.h.example)."
 #endif
 #if !defined(BOILER_API_BASE)
 #error "BoilerBridge_Client: secrets.h must define BOILER_API_BASE (see secrets.h.example)."
 #endif
-
-// Field ids are not secret; secrets.h may still override them.
-#ifndef BOILER_STATS_FIELDS
-#define BOILER_STATS_FIELDS                                                                                            \
-  "7940,79b3,7921,7e2c,77c3,7e51,77d2,f9f2,7ed3,629c,6280,621d,62ed,503e,5088,5077,5041,50f2,62d1,620f,6206,8439,47e0," \
-  "7e7a,7774,77de,6115,61ba,61eb,610b,6101,6117"
+#ifdef BOILER_STATS_FIELDS
+#error "BoilerBridge_Client: remove BOILER_STATS_FIELDS from secrets.h, the list is now STATS_FIELDS in this sketch."
 #endif
 
-// Heat pump energy fields, always appended (also when secrets.h overrides the
-// list above): COP, electrical/thermal power, kWh counters, compressor state.
-#define XTEND_ENERGY_FIELDS \
-  "f934,f91f,f926,63b3,63f0,6358,6339,63df,65a7,657e,6a53,6ac5"
+static const char *STATS_FIELDS =
+    "7940,79b3,7921,7e2c,77c3,7e51,77d2,f9f2,7ed3,629c,6280,621d,62ed,503e,5088,5077,5041,50f2,62d1,620f,6206,8439,47e0,"
+    "7e7a,7774,77de,6115,61ba,61eb,610b,6101,6117,"
+    // Heat pump energy: COP, electrical/thermal power, kWh counters, compressor state.
+    "f934,f91f,f926,63b3,63f0,6358,6339,63df,65a7,657e,6a53,6ac5";
 
 // --- Poll interval ---
 static const unsigned long POLL_INTERVAL_MS = 15000;
@@ -443,8 +440,7 @@ void loop() {
     return;
   }
 
-  String url = String(BOILER_API_BASE) + "/api/stats/values?fields=" + BOILER_STATS_FIELDS + "," +
-               XTEND_ENERGY_FIELDS;
+  String url = String(BOILER_API_BASE) + "/api/stats/values?fields=" + STATS_FIELDS;
 
   HTTPClient http;
   http.setConnectTimeout(HTTP_TIMEOUT_MS);

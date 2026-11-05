@@ -27,7 +27,7 @@ Credentials live only in **`secrets.h`** next to each sketch. Those files are **
 
 3. **Never** paste `secrets.h` into chat, screenshots of it, or commit it. The `.ino` files only `#include "secrets.h"`; if `secrets.h` is missing, the build stops with a clear error.
 
-**BoilerBridge_Client `secrets.h`:** `BOILER_SSID`, `BOILER_PASS`, **`BOILER_API_BASE`** (no trailing slash, e.g. `"http://10.20.30.1"`). Optional **`BOILER_STATS_FIELDS`** overrides the default field list in `BoilerBridge_Client.ino` (field ids are not secret, so they live in the sketch). The heat pump energy fields in **`XTEND_ENERGY_FIELDS`** (COP, electrical/thermal power, kWh counters, compressor frequency) are always appended. Plain **HTTP** by default; **HTTPS** needs extra `HTTPClient` certificate setup.
+**BoilerBridge_Client `secrets.h`:** `BOILER_SSID`, `BOILER_PASS`, **`BOILER_API_BASE`** (no trailing slash, e.g. `"http://10.20.30.1"`). The polled field ids are not secret, so they live in the sketch as **`STATS_FIELDS`**, including the heat pump energy fields (COP, electrical/thermal power, kWh counters, compressor frequency). Plain **HTTP** by default; **HTTPS** needs extra `HTTPClient` certificate setup.
 
 If you still have **`BOILER_API_URL`** from an older checkout, replace it with **`BOILER_API_BASE`** using `secrets.h.example` as a template.
 
@@ -145,7 +145,7 @@ Both boards reboot themselves when stuck: the client after 60 s without boiler W
 
 ## Protocol
 
-Client **HTTP GET**s `BOILER_API_BASE + "/api/stats/values?fields=" + BOILER_STATS_FIELDS`, then sends the response body to the server as a frame. All UART traffic is in CRC-checked frames, see `firmware/shared/bridge_link.h`; test them without hardware:
+Client **HTTP GET**s `BOILER_API_BASE + "/api/stats/values?fields=" + STATS_FIELDS`, then sends the response body to the server as a frame. All UART traffic is in CRC-checked frames, see `firmware/shared/bridge_link.h`; test them without hardware:
 
 ```bash
 c++ -std=c++17 -Ifirmware/shared tests/test_bridge_link.cpp -o /tmp/test_bridge_link && /tmp/test_bridge_link
