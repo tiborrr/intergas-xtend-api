@@ -75,7 +75,8 @@ static const unsigned long DATA_STALE_MS = 120000;
 // Passthrough. The client may first finish its 5 s stats poll and then needs up
 // to 5 s to connect; its own limit for a whole request is 90 s.
 static const unsigned long PASS_HEAD_TIMEOUT_MS = 15000;
-static const unsigned long PASS_CHUNK_TIMEOUT_MS = 10000;
+// Longer than the client's PASS_ACK_TIMEOUT_MS.
+static const unsigned long PASS_CHUNK_TIMEOUT_MS = 30000;
 static const unsigned long PASS_REQUEST_MAX_MS = 100000;
 
 static const char *OTA_USER = "ota";

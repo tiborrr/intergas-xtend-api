@@ -56,7 +56,9 @@ static const unsigned long NO_SUCCESS_RESTART_MS = 10UL * 60UL * 1000UL;
 // Passthrough. Polling waits while a request runs, so a request must end well
 // within the server's DATA_STALE_MS (120 s).
 static const unsigned long PASS_REQUEST_MAX_MS = 90000;
-static const unsigned long PASS_ACK_TIMEOUT_MS = 3000;
+// The server acks after handing a chunk to its Wi-Fi, and on a weak signal TCP
+// retries can block it for over 10 s. Must stay below PASS_CHUNK_TIMEOUT_MS there.
+static const unsigned long PASS_ACK_TIMEOUT_MS = 20000;
 
 // A firmware update stops when the server goes quiet.
 static const unsigned long OTA_IDLE_TIMEOUT_MS = 30000;
