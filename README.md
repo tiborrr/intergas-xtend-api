@@ -127,9 +127,9 @@ When both are running and UART is wired:
 | **`GET /data`** | Formatted JSON: `{ "fields": [ { "id", "raw", optional "name", "type", "unit", "scaled" }, ... ] }` built from `stats` in the latest payload. String-valued stats omit `scaled`. Unknown ids still appear with `id` and `raw`. |
 | **`GET /data/raw`** | Unchanged body from the boiler (last UART line), for debugging. |
 | **`GET /status`** | Bridge health: `build`, `uptime_s`, `frames_ok`, `frames_bad`, `data_age_ms`, `link_errors`, `pass_requests`, `pass_failed`, `wifi_rssi_dbm`, `free_heap`. |
-| **`GET /`** | Short text hint. |
-| **`GET /xtend/`** | The Xtend's own `/`. |
-| **any other `GET` or `HEAD`** | Passed to the Xtend unchanged, for example `/api/stats/values?fields=7940`. Needs the password (user `xtend`). |
+| **`GET /bridge`** | Short text hint. |
+| **`GET /`** | The Xtend's own dashboard, which only runs at `/`. Needs the password (user `xtend`). The first load takes about half a minute on a good signal, because it fetches over 30 files one at a time. `/xtend/` redirects here. |
+| **any other `GET` or `HEAD`** | Passed to the Xtend unchanged, for example `/api/stats/values?fields=7940`. Needs the password. |
 | **`POST /api/auth`** | The dashboard's service login, passed to the Xtend. Needs the password. Every other `POST` gets 405, so settings can't be written through the bridge. The password travels unencrypted: keep the bridge off the internet. |
 | **`POST /ota/server`, `/ota/client`** | Firmware upload, see OTA above. |
 
