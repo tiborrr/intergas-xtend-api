@@ -6,9 +6,9 @@
  * Role: STA on home Wi-Fi, read frames from Serial2 (from BoilerBridge_Client,
  *       see bridge_link.h), serve formatted GET /data, raw GET /data/raw and
  *       bridge health GET /status. Reachable as http://boilerbridge.local
- *       Every other GET or HEAD goes to the boiler through the client board:
- *       /xtend/ is the boiler's own /, other paths stay as they are. This needs
- *       a password, and POST only reaches the service login (bridge_link.h).
+ *       Every other GET or HEAD goes to the boiler through the client board,
+ *       path unchanged: its dashboard only runs at /. This needs a password,
+ *       and POST only reaches the service login (bridge_link.h).
  *       POST /ota/server and /ota/client install new firmware (password needed).
  *
  * Valid JSON + stats is parsed once per complete frame; HTTP handlers serve
@@ -76,14 +76,15 @@ static const unsigned long WIFI_OFFLINE_RESTART_MS = 10UL * 60UL * 1000UL;
 // a frozen value as if it were live.
 static const unsigned long DATA_STALE_MS = 120000;
 
-// Passthrough. The client may first finish its 5 s stats poll and then needs up
-// to 5 s to connect; its own limit for a whole request is 90 s.
-static const unsigned long PASS_HEAD_TIMEOUT_MS = 15000;
+// Passthrough. The client may first finish its 5 s stats poll and then tries up
+// to 4 times to reach the boiler; its own limit for a whole request is 90 s.
+static const unsigned long PASS_HEAD_TIMEOUT_MS = 45000;
 // Longer than the client's PASS_ACK_TIMEOUT_MS.
 static const unsigned long PASS_CHUNK_TIMEOUT_MS = 30000;
 static const unsigned long PASS_REQUEST_MAX_MS = 100000;
 static const char *PASS_USER = "xtend";
 static const size_t PASS_POST_BODY_MAX = 512;
+static const unsigned long PASS_SLOW_SEND_MS = 3000;
 
 static const char *OTA_USER = "ota";
 // Writing a chunk can include erasing flash on the client board.
@@ -418,16 +419,8 @@ static String encodeQueryPart(const String &part) {
   return out;
 }
 
-static String boilerUri() {
-  const String uri = server.uri();
-  if (uri == "/xtend") {
-    return "/";
-  }
-  return uri.startsWith("/xtend/") ? uri.substring(6) : uri;
-}
-
 static String boilerPath() {
-  String path = boilerUri();
+  String path = server.uri();
   for (int i = 0; i < server.args(); ++i) {
     path += i == 0 ? '?' : '&';
     path += encodeQueryPart(server.argName(i));
@@ -498,7 +491,7 @@ void handlePassthrough() {
   }
   const HTTPMethod method = server.method();
   const bool is_post = method == HTTP_POST;
-  if (method != HTTP_GET && method != HTTP_HEAD && !(is_post && bridge::isPostAllowed(boilerUri().c_str()))) {
+  if (method != HTTP_GET && method != HTTP_HEAD && !(is_post && bridge::isPostAllowed(server.uri().c_str()))) {
     server.send(405, "text/plain", "the passthrough only allows GET, HEAD and the service login\n");
     return;
   }
@@ -512,7 +505,7 @@ void handlePassthrough() {
   static uint8_t s_nextId = 0;
   const uint8_t id = ++s_nextId;
   // A POST has no query: the login's body would otherwise end up in it as "plain".
-  String request = is_post ? "POST " + boilerUri() : String(method == HTTP_HEAD ? "HEAD " : "GET ") + boilerPath();
+  String request = is_post ? "POST " + server.uri() : String(method == HTTP_HEAD ? "HEAD " : "GET ") + boilerPath();
   request += "\n";
   for (const char *name : kForwardedRequestHeaders) {
     if (server.hasHeader(name)) {
@@ -551,7 +544,12 @@ void handlePassthrough() {
     if (s_parser.type() != bridge::kRespData || !server.client().connected()) {
       break;  // no ack: the client board stops by itself
     }
+    const unsigned long send_start = millis();
     server.sendContent(s_parser.payload(), s_parser.length());
+    if (millis() - send_start > PASS_SLOW_SEND_MS) {
+      Serial.printf("Passthrough: sending a chunk took %lu ms, connected=%d\n", millis() - send_start,
+                    server.client().connected());
+    }
     sendFrame(bridge::kAck, id, nullptr, 0);
   }
 
@@ -669,10 +667,17 @@ static void checkFirmwareHealth() {
   }
 }
 
-void handleRoot() {
+void handleBridgeInfo() {
   server.send(200, "text/plain",
                "BoilerBridge_Server — GET /data formatted fields, GET /data/raw verbatim, "
-               "GET /status bridge health, GET /xtend/ the boiler's own pages (read-only)\n");
+               "GET /status bridge health, GET / the boiler's own dashboard (password needed)\n");
+}
+
+// The dashboard's own router only knows the paths it has at the boiler, so it
+// can't run under a prefix. The old address keeps working.
+void handleOldDashboardPath() {
+  server.sendHeader("Location", "/");
+  server.send(302, "text/plain", "");
 }
 
 static unsigned long dataAgeMs() { return millis() - s_lastFrameMs; }
@@ -794,7 +799,9 @@ void setup() {
     Serial.println("[mDNS] start failed");
   }
 
-  server.on("/", handleRoot);
+  server.on("/bridge", handleBridgeInfo);
+  server.on("/xtend", handleOldDashboardPath);
+  server.on("/xtend/", handleOldDashboardPath);
   server.on("/data", handleData);
   server.on("/data/raw", handleDataRaw);
   server.on("/status", handleStatus);

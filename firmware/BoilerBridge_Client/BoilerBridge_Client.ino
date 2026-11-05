@@ -56,6 +56,9 @@ static const unsigned long PASS_REQUEST_MAX_MS = 90000;
 // The server acks after handing a chunk to its Wi-Fi, and on a weak signal TCP
 // retries can block it for over 10 s. Must stay below PASS_CHUNK_TIMEOUT_MS there.
 static const unsigned long PASS_ACK_TIMEOUT_MS = 20000;
+// With HTTP_TIMEOUT_MS per attempt, must stay below PASS_HEAD_TIMEOUT_MS on the server.
+static const int PASS_READ_ATTEMPTS = 4;
+static const unsigned long PASS_READ_RETRY_DELAY_MS = 2000;
 
 // A firmware update stops when the server goes quiet.
 static const unsigned long OTA_IDLE_TIMEOUT_MS = 30000;
@@ -185,6 +188,7 @@ class ChunkStream : public Stream {
     sendFrame(bridge::kRespData, id_, buf_, used_);
     used_ = 0;
     if (!waitForAck(id_, PASS_ACK_TIMEOUT_MS)) {
+      Serial.printf("Passthrough: no ack from the server, %u parser errors\n", s_parser.errors());
       failed_ = true;
     }
   }
@@ -262,10 +266,20 @@ static void handlePassthrough(uint8_t id) {
   const size_t count = sizeof(kResponseHeaders) / sizeof(kResponseHeaders[0]);
   http.collectHeaders(kResponseHeaders, count);
 
-  const int code = is_post && request_body != nullptr
-                       ? http.sendRequest(method, reinterpret_cast<uint8_t *>(const_cast<char *>(request_body)),
-                                          strlen(request_body))
-                       : http.sendRequest(method);
+  int code;
+  if (is_post && request_body != nullptr) {
+    code = http.sendRequest(method, reinterpret_cast<uint8_t *>(const_cast<char *>(request_body)),
+                            strlen(request_body));
+  } else {
+    // The boiler sometimes doesn't answer. One missing file stops its whole
+    // dashboard, and asking again is safe for reads.
+    code = http.sendRequest(method);
+    for (int retry = 1; code <= 0 && retry < PASS_READ_ATTEMPTS; ++retry) {
+      Serial.printf("Passthrough %s %s: %s, trying again\n", method, path, http.errorToString(code).c_str());
+      delay(PASS_READ_RETRY_DELAY_MS);
+      code = http.sendRequest(method);
+    }
+  }
   if (code <= 0) {
     Serial.printf("Passthrough %s %s failed: %d %s\n", method, path, code, http.errorToString(code).c_str());
     http.end();
