@@ -1,6 +1,6 @@
 # intergas-xtend-api
 
-Firmware for **two ESP32** boards: one stays on the **boiler’s Wi‑Fi** and reads its **HTTP API**; the other stays on your **home Wi‑Fi** and exposes **`GET /data`** (formatted Xtend fields) and **`GET /data/raw`** (verbatim UART payload). They exchange data over **UART** (Serial2).
+Firmware for **two ESP32** boards: one stays on the **boiler’s Wi‑Fi** and reads its **HTTP API**; the other stays on your **home Wi‑Fi** and exposes **`GET /data`** (formatted Xtend fields), **`GET /data/raw`** (verbatim payload), a **read-only passthrough** to the Xtend's own pages and API, and **firmware updates over the network**. They exchange data over **UART** (Serial2).
 
 ## Hardware UART (both sketches use the same pin defines)
 
@@ -33,7 +33,7 @@ If you still have **`BOILER_API_URL`** from an older checkout, replace it with *
 
 Compiled firmware (`.bin`, `.elf`) contains these passwords in plain text; `.gitignore` keeps them out of git — don't share build output either.
 
-**BoilerBridge_Server `secrets.h`:** `HOME_SSID`, `HOME_PASS`.
+**BoilerBridge_Server `secrets.h`:** `HOME_SSID`, `HOME_PASS`, **`OTA_PASSWORD`** (protects firmware updates; generate one with `openssl rand -hex 16`).
 
 `secrets.h.example` stays in git with **fake placeholders** only.
 
@@ -95,6 +95,21 @@ Override defaults:
 - **`ARDUINO_PORT`** — fixed port when several USB serial devices exist  
 - **`FQBN`** — default is `esp32:esp32:nodemcu-32s` (change if your board needs another profile)
 
+### Over the network (OTA)
+
+Once both boards run this firmware, no USB is needed:
+
+```bash
+./scripts/ota.sh server
+./scripts/ota.sh client
+```
+
+The script builds the sketch and uploads it to the server board (user `ota`, password `OTA_PASSWORD`). The client board sits on the boiler's Wi-Fi and can't be reached from home, so the server sends its firmware over the UART; expect 2 to 3 minutes for the client, during which `/data` returns no fresh data.
+
+A bad update reverts itself. New firmware only stays when it proves healthy: the server after 60 s on the home network, the client once the server acknowledges a stats frame. Without that within 5 minutes, or after a crash, the bootloader returns to the previous firmware. The healthy check can't catch everything, so update one board at a time and check **`/status`** in between.
+
+Both boards must speak the same UART protocol (`firmware/shared/bridge_link.h`). When changing the framing of existing frame types, keep the OTA frames working, or a client can no longer be updated over the network.
+
 ### Manual (`arduino-cli`)
 
 ```bash
@@ -111,8 +126,11 @@ When both are running and UART is wired:
 |-----|----------|
 | **`GET /data`** | Formatted JSON: `{ "fields": [ { "id", "raw", optional "name", "type", "unit", "scaled" }, ... ] }` built from `stats` in the latest payload. String-valued stats omit `scaled`. Unknown ids still appear with `id` and `raw`. |
 | **`GET /data/raw`** | Unchanged body from the boiler (last UART line), for debugging. |
-| **`GET /status`** | Bridge health: `uptime_s`, `frames_ok`, `frames_bad`, `data_age_ms`, `wifi_rssi_dbm`, `free_heap`. |
+| **`GET /status`** | Bridge health: `build`, `uptime_s`, `frames_ok`, `frames_bad`, `data_age_ms`, `link_errors`, `pass_requests`, `pass_failed`, `wifi_rssi_dbm`, `free_heap`. |
 | **`GET /`** | Short text hint. |
+| **`GET /xtend/`** | The Xtend's own `/`. |
+| **any other `GET` or `HEAD`** | Passed to the Xtend unchanged, for example `/api/stats/values?fields=7940`. Read-only for now: other methods get 405. |
+| **`POST /ota/server`, `/ota/client`** | Firmware upload, see OTA above. |
 
 The server announces itself over mDNS, so `http://boilerbridge.local/data` works on most networks.
 
@@ -126,6 +144,12 @@ Both boards reboot themselves when stuck: the client after 60 s without boiler W
 
 ## Protocol
 
-Client **HTTP GET**s `BOILER_API_BASE + "/api/stats/values?fields=" + BOILER_STATS_FIELDS`, then forwards the response body on Serial2 as **one line** terminated with **`\n`**: carriage returns and line feeds **inside** the body are **removed** (not replaced with spaces) so pretty-printed JSON stays valid JSON. Server stores the last complete line.
+Client **HTTP GET**s `BOILER_API_BASE + "/api/stats/values?fields=" + BOILER_STATS_FIELDS`, then sends the response body to the server as a frame. All UART traffic is in CRC-checked frames, see `firmware/shared/bridge_link.h`; test them without hardware:
+
+```bash
+c++ -std=c++17 -Ifirmware/shared tests/test_bridge_link.cpp -o /tmp/test_bridge_link && /tmp/test_bridge_link
+```
+
+**Passthrough:** the server handles one request at a time and sends it to the client, which sends the response back in acknowledged 1 kB chunks. At 115200 baud that is roughly 10 kB/s, and while a request runs `/data` and `/status` wait and the client doesn't poll, so don't leave a dashboard open while collecting data. On a weak Wi-Fi signal a transfer can pause for many seconds while TCP retries; check `wifi_rssi_dbm` in `/status`. The Xtend only serves its pages gzipped: send `Accept-Encoding: gzip` (browsers do; for curl use `--compressed`). There is **no password** on the passthrough: anyone on the home network can read the Xtend through it, and a boiler that changes state on a GET would be exposed too. Add authentication before ever allowing POST.
 
 **Tuning:** If **`/data`** fails to parse or serialize, increase **`JSON_IN_CAPACITY`** / **`JSON_OUT_CAPACITY`** in `BoilerBridge_Server.ino` (and ensure **`PAYLOAD_MAX`** / client **`BOILER_BODY_MAX`** are large enough for your boiler response).
