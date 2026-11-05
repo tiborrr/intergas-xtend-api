@@ -172,10 +172,10 @@ static bool waitWifiConnected(uint32_t timeout_ms) {
 }
 
 static bool connectHomeWifiStartup() {
+  WiFi.setHostname(MDNS_HOSTNAME);  // the core applies it when WiFi.mode() enables the station
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
   WiFi.setAutoReconnect(true);
-  WiFi.setHostname("BoilerBridge-Server");
 
   for (int round = 0; round < WIFI_STARTUP_MAX_ROUNDS; ++round) {
     if (round > 0) {
