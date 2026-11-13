@@ -71,6 +71,10 @@ static const int WIFI_STARTUP_MAX_ROUNDS = 5;
 static const unsigned long WIFI_LOOP_RECONNECT_INTERVAL_MS = 30000;
 // Offline this long in loop() -> reboot (clears stuck Wi-Fi driver states).
 static const unsigned long WIFI_OFFLINE_RESTART_MS = 10UL * 60UL * 1000UL;
+// With several access points on one SSID the ESP32 never roams by itself.
+// Look for a clearly stronger one now and then and move to it.
+static const unsigned long WIFI_ROAM_CHECK_INTERVAL_MS = 15UL * 60UL * 1000UL;
+static const int WIFI_ROAM_MARGIN_DB = 8;
 
 // Client polls every 15 s; older data is served as 503 so consumers never log
 // a frozen value as if it were live.
@@ -193,6 +197,11 @@ static bool connectHomeWifiStartup() {
     delay(200);
     WiFi.mode(WIFI_STA);
     WiFi.setSleep(false);
+    // The default (fast scan) joins the first access point it finds with this
+    // SSID, which may be a far-away one. Scan every channel and take the
+    // strongest.
+    WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
+    WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
     WiFi.begin(HOME_SSID, HOME_PASS);
     Serial.print("Connecting to home Wi-Fi ");
     Serial.print(HOME_SSID);
@@ -205,6 +214,62 @@ static bool connectHomeWifiStartup() {
 }
 
 static unsigned long s_lastWifiLoopReconnectMs = 0;
+static unsigned long s_lastRoamCheckMs = 0;
+static bool s_roamScanRunning = false;
+static uint32_t s_roams = 0;
+
+// Runs a scan in the background every WIFI_ROAM_CHECK_INTERVAL_MS, and moves
+// to another access point with this SSID when it is WIFI_ROAM_MARGIN_DB
+// stronger. Never blocks: the web server keeps answering during the scan.
+static void checkRoaming() {
+  const unsigned long now = millis();
+  if (!s_roamScanRunning) {
+    if (now - s_lastRoamCheckMs < WIFI_ROAM_CHECK_INTERVAL_MS) {
+      return;
+    }
+    s_lastRoamCheckMs = now;
+    if (WiFi.scanNetworks(true) == WIFI_SCAN_FAILED) {
+      return;
+    }
+    s_roamScanRunning = true;
+    return;
+  }
+
+  const int16_t n = WiFi.scanComplete();
+  if (n == WIFI_SCAN_RUNNING) {
+    return;
+  }
+  s_roamScanRunning = false;
+  if (n < 0) {
+    return;
+  }
+
+  const int current_rssi = WiFi.RSSI();
+  uint8_t current_bssid[6];
+  memcpy(current_bssid, WiFi.BSSID(), sizeof(current_bssid));
+  int best = -1;
+  for (int i = 0; i < n; ++i) {
+    if (WiFi.SSID(i) != HOME_SSID || memcmp(WiFi.BSSID(i), current_bssid, 6) == 0) {
+      continue;
+    }
+    if (best < 0 || WiFi.RSSI(i) > WiFi.RSSI(best)) {
+      best = i;
+    }
+  }
+  if (best >= 0 && WiFi.RSSI(best) >= current_rssi + WIFI_ROAM_MARGIN_DB) {
+    uint8_t bssid[6];
+    memcpy(bssid, WiFi.BSSID(best), sizeof(bssid));
+    const int32_t channel = WiFi.channel(best);
+    Serial.printf("[WiFi] roaming from %s (%d dBm) to %s (%d dBm, channel %d)\n",
+                  WiFi.BSSIDstr().c_str(), current_rssi, WiFi.BSSIDstr(best).c_str(),
+                  static_cast<int>(WiFi.RSSI(best)), static_cast<int>(channel));
+    WiFi.scanDelete();
+    ++s_roams;
+    WiFi.begin(HOME_SSID, HOME_PASS, channel, bssid);
+    return;
+  }
+  WiFi.scanDelete();
+}
 
 // Auto-reconnect does most of the work; this only nudges it now and then.
 // (A full disconnect/begin every few seconds aborts handshakes in progress.)
@@ -599,8 +664,14 @@ static void otaUpload(bool to_client) {
     if (to_client) {
       sendFrame(bridge::kOtaBegin, kOtaId, nullptr, 0);
       s_otaOk = otaWaitClient(kOtaId, OTA_CHUNK_TIMEOUT_MS, bridge::kAck);
-    } else if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
-      otaFail();
+    } else {
+      // An upload that broke off midway never reaches UPLOAD_FILE_ABORTED and
+      // leaves the updater running, which makes every later begin() fail
+      // with "No Error". Start clean instead.
+      Update.abort();
+      if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
+        otaFail();
+      }
     }
   } else if (!s_otaOk) {
     return;
@@ -726,6 +797,9 @@ void handleStatus() {
   doc["pass_requests"] = s_passRequests;
   doc["pass_failed"] = s_passFailed;
   doc["wifi_rssi_dbm"] = WiFi.RSSI();
+  doc["wifi_bssid"] = WiFi.BSSIDstr();
+  doc["wifi_channel"] = WiFi.channel();
+  doc["wifi_roams"] = s_roams;
   doc["free_heap"] = ESP.getFreeHeap();
   char out[512];
   serializeJson(doc, out, sizeof(out));
@@ -831,5 +905,6 @@ void loop() {
   }
   s_wifiDownSinceMs = 0;
 
+  checkRoaming();
   server.handleClient();
 }
