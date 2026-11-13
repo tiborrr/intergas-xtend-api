@@ -664,8 +664,14 @@ static void otaUpload(bool to_client) {
     if (to_client) {
       sendFrame(bridge::kOtaBegin, kOtaId, nullptr, 0);
       s_otaOk = otaWaitClient(kOtaId, OTA_CHUNK_TIMEOUT_MS, bridge::kAck);
-    } else if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
-      otaFail();
+    } else {
+      // An upload that broke off midway never reaches UPLOAD_FILE_ABORTED and
+      // leaves the updater running, which makes every later begin() fail
+      // with "No Error". Start clean instead.
+      Update.abort();
+      if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
+        otaFail();
+      }
     }
   } else if (!s_otaOk) {
     return;
